@@ -67,6 +67,8 @@ from vllm.model_executor.layers.linear import (
     RowParallelLinear,
 )
 from vllm.model_executor.layers.quantization import QuantizationConfig
+from vllm.model_executor.layers.quantization.auto_gptq import AutoGPTQConfig
+from vllm.model_executor.layers.quantization.inc import INCConfig
 from vllm.model_executor.layers.quantization.modelopt import ModelOptNvFp4Config
 from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
 from vllm.model_executor.layers.utils import dispatch_unquantized_gemm
@@ -1321,10 +1323,9 @@ class MuseSpark1xDecoderLayer(nn.Module):
 
         self.self_attn = MuseSpark1xAttention(
             config=config,
-            max_position_embeddings=max(
-                config.max_position_embeddings,
-                vllm_config.model_config.max_model_len,
-            ),
+            # Unscaled RoPE only needs positions < max_model_len; sizing the
+            # cos/sin cache by the 1M-token config costs ~11.5 GiB per GPU.
+            max_position_embeddings=vllm_config.model_config.max_model_len,
             cache_config=cache_config,
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
@@ -1752,8 +1753,12 @@ class MuseSpark1xForCausalLM(LlamaForCausalLM, SupportsLoRA, MixtureOfExperts):
     decoder_layer_cls = MuseSpark1xDecoderLayer
     supported_quantization_configs: tuple[type[QuantizationConfig], ...] = (
         ModelOptNvFp4Config,
+        INCConfig,
+        AutoGPTQConfig,
     )
-    supported_quantization_description = "NVFP4 (modelopt_fp4)"
+    supported_quantization_description = (
+        "NVFP4 (modelopt_fp4) or GPTQ-format WNA16 expert (inc / auto-round, gptq)"
+    )
 
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
